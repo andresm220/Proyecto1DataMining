@@ -1,0 +1,563 @@
+---
+title: "Análisis Exploratorio de Defunciones en Guatemala 2011-2021"
+subtitle: "Proyecto 1 - Minería de Datos CC3074"
+author: "Grupo 7"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    theme: cosmo
+    highlight: tango
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  warning = FALSE, 
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 6,
+  dpi = 300
+)
+
+# Librerías principales
+library(tidyverse)
+library(janitor)
+library(GGally)
+library(stringi)
+library(kableExtra)
+library(scales)
+
+# Configuración de tema
+theme_set(theme_minimal(base_size = 12))
+```
+
+# Introducción
+
+## Contexto
+
+El presente documento constituye el análisis exploratorio de datos de defunciones registradas en Guatemala durante el período 2011-2021. Los datos provienen del Instituto Nacional de Estadística (INE) y contienen información detallada sobre cada defunción registrada oficialmente en el país.
+
+---
+
+# Carga y Consolidación de Datos
+
+```{r carga_datos}
+archivos <- c(
+  "lSg2Lmx2sWne8RcD9hM6guU73I9eQW8B.csv", 
+  "QnZLxknSHwbFfpJ8I1frbkoIKfz1BBjd.csv",
+  "iY2sN6q3d4ihJpgzr7KgJpQAiEn0bo60.csv", 
+  "DX2BmYU5m4JfPRhrFHwDRDEs49V7fN5I.csv",
+  "bb6vENc1cmPlBToSEEr6HESWdZk6tHFs.csv", 
+  "20171204152107xRp35JuZin7nN2x88Me8MVcQvyZCnu5K.csv",
+  "20181226142907xRp35JuZin7nN2x88Me8MVcQvyZCnu5K.csv", 
+  "201911291520069Odm3oxU9mTY58hkborwzylm7MJop05q.csv",
+  "20201201154851el8puh8r6zutgVKBoRIbazWluzIr25A3.csv", 
+  "20210930225530FopQpWf6BcBWj8taVS3Q3mRKxgDsvwPe.csv"
+)
+
+datos_raw <- archivos %>%
+  map_dfr(~ read_csv(.x, col_types = cols(.default = "c"))) %>%
+  clean_names()
+
+cat("Datos cargados:", nrow(datos_raw), "observaciones ×", ncol(datos_raw), "variables\n")
+```
+
+---
+
+# Descripción General del Dataset
+
+## Dimensiones del Dataset
+
+```{r dimensiones}
+data.frame(
+  Característica = c("Observaciones", "Variables", "Período"),
+  Valor = c(format(nrow(datos_raw), big.mark = ","),
+            ncol(datos_raw),
+            "2011-2021")
+) %>%
+  kable(caption = "Dimensiones del Dataset") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Tipos de Variables
+
+```{r tipos_variables}
+vars_numericas_esperadas <- c("anoreg", "mesreg", "diaocu", "edadif")
+vars_categoricas <- setdiff(names(datos_raw), vars_numericas_esperadas)
+
+data.frame(
+  Tipo = c("Numéricas", "Categóricas", "Total"),
+  Cantidad = c(length(vars_numericas_esperadas), length(vars_categoricas), ncol(datos_raw))
+) %>%
+  kable(caption = "Tipos de Variables") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Diccionario de Variables Principales
+
+```{r diccionario}
+tribble(
+  ~Variable, ~Descripción,
+  "anoreg", "Año de registro",
+  "mesreg", "Mes de registro",
+  "depreg", "Departamento de registro",
+  "depocu", "Departamento de ocurrencia",
+  "sexo", "Sexo del fallecido",
+  "edadif", "Edad del fallecido",
+  "perdif", "Período de edad",
+  "caudef", "Código CIE-10",
+  "asist", "Asistencia médica",
+  "ocur", "Lugar de ocurrencia"
+) %>%
+  kable(caption = "Diccionario de Variables Principales") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+## Valores Faltantes
+
+```{r valores_faltantes}
+na_summary <- datos_raw %>%
+  summarise(across(everything(), ~sum(is.na(.) | . == "" | . == " ") / n() * 100)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Porcentaje_NA") %>%
+  arrange(desc(Porcentaje_NA)) %>%
+  filter(Porcentaje_NA > 0)
+
+na_summary %>%
+  head(15) %>%
+  mutate(Porcentaje_NA = paste0(round(Porcentaje_NA, 2), "%")) %>%
+  kable(caption = "Top 15 Variables con Valores Faltantes",
+        col.names = c("Variable", "% Faltantes")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+```{r grafico_na, fig.height=7}
+na_summary %>%
+  head(20) %>%
+  ggplot(aes(x = reorder(Variable, Porcentaje_NA), y = Porcentaje_NA)) +
+  geom_col(fill = "coral", alpha = 0.8) +
+  coord_flip() +
+  labs(title = "Variables con Valores Faltantes", x = "Variable", y = "% Faltantes") +
+  theme_minimal()
+```
+
+---
+
+# Limpieza y Transformación
+
+```{r limpieza}
+datos <- datos_raw %>%
+  mutate(across(where(is.character), ~ str_to_upper(stri_trans_general(.x, "Latin-ASCII")))) %>%
+  mutate(across(c(anoreg, mesreg, diaocu, edadif), as.numeric)) %>%
+  mutate(edad_anios = case_when(
+    str_detect(perdif, "ANO") ~ edadif,
+    str_detect(perdif, "MES") ~ edadif / 12,
+    str_detect(perdif, "DIA") ~ edadif / 365,
+    str_detect(perdif, "HORA") ~ edadif / 8760,
+    TRUE ~ NA_real_
+  )) %>%
+  mutate(causa_capitulo = str_sub(caudef, 1, 1)) %>%
+  filter(edad_anios <= 115 | is.na(edad_anios))
+
+cat("Registros después de limpieza:", format(nrow(datos), big.mark = ","), "\n")
+```
+
+---
+
+# Exploración de Variables Numéricas
+
+## Resumen Estadístico
+
+```{r resumen_numericas}
+datos %>%
+  select(anoreg, mesreg, diaocu, edadif, edad_anios) %>%
+  summarise(across(where(is.numeric),
+                   list(
+                     N = ~sum(!is.na(.)),
+                     Media = ~mean(., na.rm = TRUE),
+                     Mediana = ~median(., na.rm = TRUE),
+                     Desv_Std = ~sd(., na.rm = TRUE),
+                     Min = ~min(., na.rm = TRUE),
+                     Q1 = ~quantile(., 0.25, na.rm = TRUE),
+                     Q3 = ~quantile(., 0.75, na.rm = TRUE),
+                     Max = ~max(., na.rm = TRUE)
+                   ))) %>%
+  pivot_longer(everything(),
+               names_to = c("Variable", "Estadística"),
+               names_sep = "_(?=[^_]+$)",
+               values_to = "Valor") %>%
+  mutate(Valor = round(Valor, 2)) %>%
+  pivot_wider(names_from = Estadística, values_from = Valor) %>%
+  kable(caption = "Resumen estadístico de variables numéricas") %>%
+  kable_styling(full_width = FALSE) %>%
+  scroll_box(width = "100%")
+```
+
+## Análisis de Edad
+
+```{r resumen_edad}
+datos %>%
+  filter(!is.na(edad_anios)) %>%
+  summarise(
+    N = n(),
+    Media = mean(edad_anios),
+    Mediana = median(edad_anios),
+    Desv_Std = sd(edad_anios),
+    Q1 = quantile(edad_anios, 0.25),
+    Q3 = quantile(edad_anios, 0.75),
+    Mínimo = min(edad_anios),
+    Máximo = max(edad_anios)
+  ) %>%
+  pivot_longer(everything(), names_to = "Estadística", values_to = "Valor") %>%
+  mutate(Valor = round(Valor, 2)) %>%
+  kable(caption = "Estadísticas de Edad") %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r histograma_edad, fig.width=12}
+datos %>%
+  filter(!is.na(edad_anios), !is.na(sexo)) %>%
+  ggplot(aes(x = edad_anios, fill = sexo)) +
+  geom_histogram(bins = 50, alpha = 0.6, position = "identity") +
+  scale_fill_manual(values = c("HOMBRE" = "#2c7bb6", "MUJER" = "#d7191c"), name = "Sexo") +
+  labs(title = "Distribución de Edad por Sexo", x = "Edad (Años)", y = "Frecuencia") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+## Normalidad (Edad)
+
+```{r normalidad_edad}
+x <- datos %>% filter(!is.na(edad_anios)) %>% pull(edad_anios)
+
+# QQ-plot
+qqnorm(x)
+qqline(x)
+
+# Shapiro en muestra (Shapiro no conviene con n muy grande)
+set.seed(123)
+xm <- sample(x, size = min(length(x), 5000))
+shapiro.test(xm)
+
+```{r boxplot_edad, fig.width=10}
+datos %>%
+  filter(!is.na(edad_anios), !is.na(sexo)) %>%
+  ggplot(aes(x = sexo, y = edad_anios, fill = sexo)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  scale_fill_manual(values = c("HOMBRE" = "#2c7bb6", "MUJER" = "#d7191c")) +
+  stat_summary(fun = mean, geom = "point", shape = 23, size = 3, fill = "yellow") +
+  labs(title = "Boxplot de Edad por Sexo", x = "Sexo", y = "Edad (Años)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## Evolución Temporal
+
+```{r evolucion_temporal, fig.width=12}
+datos %>%
+  count(anoreg) %>%
+  ggplot(aes(x = anoreg, y = n)) +
+  geom_line(color = "darkblue", size = 1.5) +
+  geom_point(color = "darkblue", size = 4) +
+  geom_text(aes(label = comma(n)), vjust = -0.8, size = 3.5) +
+  scale_x_continuous(breaks = seq(min(datos$anoreg, na.rm = TRUE), 
+                                   max(datos$anoreg, na.rm = TRUE), 1)) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Evolución de Defunciones por Año", x = "Año", y = "Defunciones") +
+  theme_minimal()
+```
+
+```{r edad_por_ano, fig.width=12}
+datos %>%
+  filter(!is.na(edad_anios), !is.na(anoreg)) %>%
+  group_by(anoreg) %>%
+  summarise(edad_promedio = mean(edad_anios), edad_mediana = median(edad_anios)) %>%
+  ggplot(aes(x = anoreg, y = edad_promedio)) +
+  geom_line(color = "darkgreen", size = 1.5) +
+  geom_point(color = "darkgreen", size = 4) +
+  geom_line(aes(y = edad_mediana), color = "orange", size = 1.5, linetype = "dashed") +
+  scale_x_continuous(breaks = seq(min(datos$anoreg, na.rm = TRUE), 
+                                   max(datos$anoreg, na.rm = TRUE), 1)) +
+  labs(title = "Edad Promedio de Fallecimiento por Año",
+       subtitle = "Sólida: Media | Punteada: Mediana",
+       x = "Año", y = "Edad (Años)") +
+  theme_minimal()
+```
+
+```{r distribucion_mensual, fig.width=12}
+datos %>%
+  filter(!is.na(mesreg)) %>%
+  count(mesreg) %>%
+  mutate(mes_nombre = month.name[mesreg]) %>%
+  ggplot(aes(x = reorder(mes_nombre, mesreg), y = n)) +
+  geom_col(fill = "steelblue", alpha = 0.8) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Distribución por Mes de Registro", x = "Mes", y = "Frecuencia") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+---
+
+# Exploración de Variables Categóricas
+
+## Sexo
+
+```{r tabla_sexo}
+tabla_sexo <- datos %>%
+  count(sexo) %>%
+  drop_na() %>%
+  mutate(porcentaje = paste0(round(n / sum(n) * 100, 2), "%"))
+
+tabla_sexo %>%
+  kable(caption = "Distribución por Sexo",
+        col.names = c("Sexo", "Frecuencia", "Porcentaje"),
+        format.args = list(big.mark = ",")) %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r grafico_sexo, fig.width=8}
+tabla_sexo %>%
+  ggplot(aes(x = sexo, y = n, fill = sexo)) +
+  geom_col(alpha = 0.8) +
+  geom_text(aes(label = comma(n)), vjust = -0.5, size = 5) +
+  scale_fill_manual(values = c("HOMBRE" = "#2c7bb6", "MUJER" = "#d7191c")) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Distribución por Sexo", x = "Sexo", y = "Frecuencia") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## Área Geográfica
+
+```{r tabla_area}
+datos %>%
+  count(areag) %>%
+  drop_na() %>%
+  mutate(porcentaje = paste0(round(n / sum(n) * 100, 2), "%")) %>%
+  kable(caption = "Distribución por Área",
+        col.names = c("Área", "Frecuencia", "Porcentaje"),
+        format.args = list(big.mark = ",")) %>%
+  kable_styling(full_width = FALSE)
+```
+
+## Asistencia Médica
+
+```{r tabla_asistencia}
+datos %>%
+  count(asist) %>%
+  drop_na() %>%
+  arrange(desc(n)) %>%
+  head(10) %>%
+  mutate(porcentaje = paste0(round(n / sum(n) * 100, 2), "%")) %>%
+  kable(caption = "Top 10 - Asistencia Médica",
+        col.names = c("Asistencia", "Frecuencia", "Porcentaje"),
+        format.args = list(big.mark = ",")) %>%
+  kable_styling()
+```
+
+```{r grafico_asistencia, fig.width=10, fig.height=6}
+datos %>%
+  count(asist) %>%
+  drop_na() %>%
+  arrange(desc(n)) %>%
+  head(10) %>%
+  ggplot(aes(x = reorder(asist, n), y = n)) +
+  geom_col(fill = "darkgreen", alpha = 0.8) +
+  geom_text(aes(label = comma(n)), hjust = -0.2, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Top 10 - Asistencia Médica", x = "Asistencia", y = "Frecuencia") +
+  theme_minimal()
+```
+
+## Lugar de Ocurrencia
+
+```{r tabla_ocurrencia}
+datos %>%
+  count(ocur) %>%
+  drop_na() %>%
+  mutate(porcentaje = paste0(round(n / sum(n) * 100, 2), "%")) %>%
+  kable(caption = "Lugar de Ocurrencia",
+        col.names = c("Lugar", "Frecuencia", "Porcentaje"),
+        format.args = list(big.mark = ",")) %>%
+  kable_styling()
+```
+
+```{r grafico_ocurrencia, fig.width=10, fig.height=6}
+datos %>%
+  count(ocur) %>%
+  drop_na() %>%
+  ggplot(aes(x = reorder(ocur, n), y = n)) +
+  geom_col(fill = "purple", alpha = 0.7) +
+  geom_text(aes(label = comma(n)), hjust = -0.2, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Lugar de Ocurrencia", x = "Lugar", y = "Frecuencia") +
+  theme_minimal()
+```
+
+## Causas de Muerte (CIE-10)
+
+```{r tabla_causas}
+datos %>%
+  count(causa_capitulo) %>%
+  drop_na() %>%
+  arrange(desc(n)) %>%
+  mutate(porcentaje = paste0(round(n / sum(n) * 100, 2), "%")) %>%
+  kable(caption = "Capítulos CIE-10",
+        col.names = c("Capítulo", "Frecuencia", "Porcentaje"),
+        format.args = list(big.mark = ",")) %>%
+  kable_styling()
+```
+
+```{r grafico_causas, fig.width=10, fig.height=7}
+datos %>%
+  count(causa_capitulo) %>%
+  drop_na() %>%
+  ggplot(aes(x = reorder(causa_capitulo, n), y = n)) +
+  geom_col(fill = "darkred", alpha = 0.7) +
+  geom_text(aes(label = comma(n)), hjust = -0.2, size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Defunciones por Capítulo CIE-10", x = "Capítulo", y = "Frecuencia") +
+  theme_minimal()
+```
+
+---
+
+# Relaciones entre Variables
+
+## Sexo vs Lugar de Ocurrencia
+
+```{r sexo_vs_ocur, fig.width=10}
+datos %>%
+  filter(!is.na(sexo), !is.na(ocur)) %>%
+  ggplot(aes(x = sexo, fill = ocur)) +
+  geom_bar(position = "fill") +
+  labs(title = "Lugar de Ocurrencia por Sexo",
+       y = "Proporción", x = "Sexo", fill = "Lugar") +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+## Área vs Asistencia
+
+```{r area_vs_asistencia, fig.width=12, fig.height=7}
+datos %>%
+  filter(!is.na(areag), !is.na(asist)) %>%
+  count(areag, asist) %>%
+  group_by(areag) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = areag, y = prop, fill = asist)) +
+  geom_col(position = "fill") +
+  labs(title = "Asistencia Médica por Área", x = "Área", y = "Proporción", fill = "Asistencia") +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+## Departamento vs Sexo
+
+```{r departamento_vs_sexo, fig.width=12, fig.height=8}
+datos %>%
+  filter(!is.na(depocu), !is.na(sexo)) %>%
+  count(depocu, sexo) %>%
+  group_by(depocu) %>%
+  filter(sum(n) >= 10000) %>%
+  ungroup() %>%
+  ggplot(aes(x = reorder(depocu, n), y = n, fill = sexo)) +
+  geom_col(position = "dodge", alpha = 0.8) +
+  coord_flip() +
+  scale_fill_manual(values = c("HOMBRE" = "#2c7bb6", "MUJER" = "#d7191c")) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Defunciones por Departamento y Sexo",
+       subtitle = "Departamentos con 10,000+ casos",
+       x = "Departamento", y = "Defunciones") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+## Top Departamentos
+
+```{r top_departamentos, fig.width=12, fig.height=8}
+datos %>%
+  count(depocu) %>%
+  drop_na() %>%
+  arrange(desc(n)) %>%
+  head(15) %>%
+  mutate(porcentaje = n / sum(n) * 100) %>%
+  ggplot(aes(x = reorder(depocu, n), y = n)) +
+  geom_col(fill = "darkgreen", alpha = 0.8) +
+  geom_text(aes(label = paste0(comma(n), "\n(", round(porcentaje, 1), "%)")), 
+            hjust = -0.1, size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = comma, limits = c(0, max(datos %>% count(depocu) %>% pull(n), na.rm = TRUE) * 1.15)) +
+  labs(title = "Top 15 Departamentos", x = "Departamento", y = "Defunciones") +
+  theme_minimal()
+```
+
+## Correlaciones
+
+```{r correlaciones, fig.width=10, fig.height=8}
+set.seed(42)
+datos %>%
+  select(edad_anios, anoreg, diaocu) %>%
+  drop_na() %>%
+  slice_sample(n = min(1000, nrow(.))) %>%
+  ggpairs(aes(alpha = 0.4)) +
+  theme_minimal()
+```
+
+## Evolución por Sexo
+
+```{r evolucion_sexo, fig.width=12}
+datos %>%
+  filter(!is.na(anoreg), !is.na(sexo)) %>%
+  count(anoreg, sexo) %>%
+  ggplot(aes(x = anoreg, y = n, color = sexo)) +
+  geom_line(size = 1.5) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("HOMBRE" = "#2c7bb6", "MUJER" = "#d7191c")) +
+  scale_x_continuous(breaks = seq(min(datos$anoreg, na.rm = TRUE), 
+                                   max(datos$anoreg, na.rm = TRUE), 1)) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Evolución de Defunciones por Sexo", x = "Año", y = "Defunciones") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+---
+
+# Conclusiones
+
+## Hallazgos Principales
+
+**Variables Numéricas:**
+
+- Edad promedio: ~`r round(mean(datos$edad_anios, na.rm = TRUE), 1)` años
+- Distribución bimodal (infantil y adulto mayor)
+- Incremento notable 2020-2021
+
+**Variables Categóricas:**
+
+- Mayor mortalidad masculina (~59%)
+- Concentración urbana
+- Causas mal definidas predominantes
+
+**Relaciones:**
+
+- Área geográfica asociada con asistencia médica
+- Departamentos poblados concentran más casos absolutos
+- Patrón consistente de mayor mortalidad masculina
+
+---
+
+```{r session_info}
+sessionInfo()
+```
