@@ -173,7 +173,22 @@ na_summary %>%
 ```{r limpieza}
 datos <- datos_raw %>%
   mutate(across(where(is.character), ~ str_to_upper(stri_trans_general(.x, "Latin-ASCII")))) %>%
-  mutate(across(c(anoreg, mesreg, diaocu, edadif), as.numeric)) %>%
+  mutate(across(c(anoreg, diaocu, edadif), as.numeric)) %>%
+  mutate(mesreg = case_when(
+    mesreg == "ENERO" ~ 1,
+    mesreg == "FEBRERO" ~ 2,
+    mesreg == "MARZO" ~ 3,
+    mesreg == "ABRIL" ~ 4,
+    mesreg == "MAYO" ~ 5,
+    mesreg == "JUNIO" ~ 6,
+    mesreg == "JULIO" ~ 7,
+    mesreg == "AGOSTO" ~ 8,
+    mesreg == "SEPTIEMBRE" ~ 9,
+    mesreg == "OCTUBRE" ~ 10,
+    mesreg == "NOVIEMBRE" ~ 11,
+    mesreg == "DICIEMBRE" ~ 12,
+    TRUE ~ as.numeric(mesreg)
+  )) %>%
   mutate(edad_anios = case_when(
     str_detect(perdif, "ANO") ~ edadif,
     str_detect(perdif, "MES") ~ edadif / 12,
