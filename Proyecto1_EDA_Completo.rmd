@@ -1,18 +1,21 @@
 ---
 title: "Análisis Exploratorio de Defunciones en Guatemala 2011-2021"
-subtitle: "Proyecto 1 - Minería de Datos CC3074"
 author: "Grupo 7"
 date: "`r Sys.Date()`"
 output:
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
   html_document:
-    toc: true
-    toc_float: true
+    toc: yes
+    toc_float: yes
     toc_depth: 3
-    number_sections: true
+    number_sections: yes
     theme: cosmo
     highlight: tango
     code_folding: hide
     df_print: paged
+subtitle: "Proyecto 1 - Minería de Datos CC3074"
 ---
 
 ```{r setup, include=FALSE}
@@ -212,7 +215,8 @@ datos %>%
   pivot_wider(names_from = Estadistica, values_from = Valor) %>%
   kable(caption = "Resumen estadístico de variables numéricas") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
-  scroll_box(width = "100%")```
+  scroll_box(width = "100%")
+```
 
 ## Análisis de Edad
 
@@ -576,25 +580,25 @@ datos %>%
 
 ```{r p2_tabla_area_asistencia}
 tabla <- datos %>%
-  filter(!is.na(area_geo), !is.na(asis_med)) %>%
-  count(area_geo, asis_med) %>%
-  group_by(area_geo) %>%
+  filter(!is.na(areag), !is.na(asist)) %>%
+  count(areag, asist) %>%
+  group_by(areag) %>%
   mutate(prop = n / sum(n)) %>%
   ungroup()
 
 tabla %>%
-  arrange(area_geo, desc(n)) %>%
+  arrange(areag, desc(n)) %>%
   kable(caption = "Frecuencias y proporciones: Área vs Asistencia médica") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
 ```{r p2_barras_area_asistencia, fig.width=11}
 datos %>%
-  filter(!is.na(area_geo), !is.na(asis_med)) %>%
-  count(area_geo, asis_med) %>%
-  group_by(area_geo) %>%
+  filter(!is.na(areag), !is.na(asist)) %>%
+  count(areag, asist) %>%
+  group_by(areag) %>%
   mutate(prop = n / sum(n)) %>%
-  ggplot(aes(x = area_geo, y = prop, fill = asis_med)) +
+  ggplot(aes(x = areag, y = prop, fill = asist)) +
   geom_col(position = "fill", alpha = 0.85) +
   scale_y_continuous(labels = percent_format()) +
   labs(title = "Proporción de asistencia médica por área", x = "Área", y = "Proporción") +
@@ -606,8 +610,8 @@ datos %>%
 
 ```{r p3_sexo_lugar}
 datos %>%
-  filter(!is.na(sexo), !is.na(lugar_ocu)) %>%
-  count(sexo, lugar_ocu) %>%
+  filter(!is.na(sexo), !is.na(ocur)) %>%
+  count(sexo, ocur) %>%
   group_by(sexo) %>%
   mutate(prop = n / sum(n)) %>%
   ungroup() %>%
@@ -659,52 +663,70 @@ Como el dataset incluye variables categóricas y numéricas, se usa **distancia 
 ## Selección de variables para clustering
 
 ```{r clustering_preparacion}
-# Selecciona variables comunes (ajusta nombres si cambian en tu dataset)
+library(dplyr)
+
 df_clust <- datos %>%
   transmute(
     edad_anios = edad_anios,
-    sexo = as.factor(sexo),
-    area_geo = as.factor(area_geo),
-    asis_med = as.factor(asis_med),
-    lugar_ocu = as.factor(lugar_ocu)
+    sexo  = factor(sexo),
+    areag = factor(areag),
+    asist = factor(asist),
+    ocur  = factor(ocur)
   ) %>%
   drop_na()
 
-# Distancia de Gower
-d_gower <- daisy(df_clust, metric = "gower")
+# One-hot encoding + escalado
+X <- model.matrix(~ . - 1, data = df_clust)
+X_scaled <- scale(X)
+
+cat("Filas clustering:", nrow(X_scaled), " | Features:", ncol(X_scaled), "\n")
+
 ```
 
 ## Elegir número de clusters (k) con silueta
 
-```{r clustering_silueta}
-set.seed(123)
-k_vals <- 2:6
-sil_avg <- map_dbl(k_vals, ~{
-  pam_fit <- pam(d_gower, k = .x)
-  mean(pam_fit$silinfo$widths[, "sil_width"])
-})
+```{r clustering_k_selection}
+library(cluster)
 
-data.frame(k = k_vals, silueta_promedio = sil_avg) %>%
-  kable(caption = "Silueta promedio por k (PAM + Gower)") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+set.seed(123)
+n_samp <- min(5000, nrow(X_scaled))
+idx <- sample(seq_len(nrow(X_scaled)), n_samp)
+X_s <- X_scaled[idx, ]
+
+ks <- 2:10
+wss <- numeric(length(ks))
+sil_avg <- numeric(length(ks))
+
+for(i in seq_along(ks)){
+  k <- ks[i]
+  km <- kmeans(X_s, centers = k, nstart = 20)
+  wss[i] <- km$tot.withinss
+  
+  sil <- silhouette(km$cluster, dist(X_s))
+  sil_avg[i] <- mean(sil[, 3])
+}
+
+k_eval <- data.frame(k = ks, WSS = wss, silueta_promedio = sil_avg)
+k_eval
 ```
 
-```{r clustering_silueta_plot, fig.width=9}
-data.frame(k = k_vals, silueta_promedio = sil_avg) %>%
-  ggplot(aes(x = k, y = silueta_promedio)) +
-  geom_line(linewidth = 1) +
-  geom_point(size = 2) +
-  labs(title = "Selección de k por silueta", x = "k (número de clusters)", y = "Silueta promedio")
+```{r clustering_k_plots, fig.width=9}
+plot(k_eval$k, k_eval$WSS, type="b",
+     xlab="k", ylab="WSS", main="Método del codo (muestra)")
+
+plot(k_eval$k, k_eval$silueta_promedio, type="b",
+     xlab="k", ylab="Silueta promedio", main="Selección de k por silueta (muestra)")
 ```
 
 ## Ajuste final y perfil de clusters
 
 ```{r clustering_final}
-k_opt <- k_vals[which.max(sil_avg)]
 set.seed(123)
-pam_final <- pam(d_gower, k = k_opt)
+k_opt <- k_eval$k[which.max(k_eval$silueta_promedio)]
+cat("k óptimo:", k_opt, "\n")
 
-df_clust$cluster <- factor(pam_final$clustering)
+km_final <- kmeans(X_scaled, centers = k_opt, nstart = 30)
+df_clust$cluster <- factor(km_final$cluster)
 
 # Resumen numérico (edad) por cluster
 res_num <- df_clust %>%
@@ -712,12 +734,11 @@ res_num <- df_clust %>%
   summarise(
     N = n(),
     edad_media = mean(edad_anios, na.rm = TRUE),
-    edad_mediana = median(edad_anios, na.rm = TRUE)
+    edad_mediana = median(edad_anios, na.rm = TRUE),
+    .groups = "drop"
   ) %>% arrange(desc(N))
 
-res_num %>%
-  kable(caption = "Resumen por cluster (edad)") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+res_num
 
 # Top categorías por cluster
 top_cat <- function(var){
@@ -728,10 +749,10 @@ top_cat <- function(var){
     ungroup()
 }
 
-top_cat("sexo") %>% kable(caption="Top 3 sexo por cluster") %>% kable_styling(full_width=FALSE)
-top_cat("area_geo") %>% kable(caption="Top 3 área por cluster") %>% kable_styling(full_width=FALSE)
-top_cat("asis_med") %>% kable(caption="Top 3 asistencia médica por cluster") %>% kable_styling(full_width=FALSE)
-top_cat("lugar_ocu") %>% kable(caption="Top 3 lugar de ocurrencia por cluster") %>% kable_styling(full_width=FALSE)
+top_cat("sexo")
+top_cat("areag")
+top_cat("asist")
+top_cat("ocur")
 ```
 
 

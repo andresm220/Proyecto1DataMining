@@ -43,7 +43,7 @@ theme_set(theme_minimal(base_size = 12))
 
 El presente documento constituye el análisis exploratorio de datos de defunciones registradas en Guatemala durante el período 2011-2021. Los datos provienen del Instituto Nacional de Estadística (INE) y contienen información detallada sobre cada defunción registrada oficialmente en el país.
 
----
+------------------------------------------------------------------------
 
 # Carga y Consolidación de Datos
 
@@ -68,7 +68,7 @@ datos_raw <- archivos %>%
 cat("Datos cargados:", nrow(datos_raw), "observaciones ×", ncol(datos_raw), "variables\n")
 ```
 
----
+------------------------------------------------------------------------
 
 # Descripción General del Dataset
 
@@ -146,7 +146,7 @@ na_summary %>%
   theme_minimal()
 ```
 
----
+------------------------------------------------------------------------
 
 # Limpieza y Transformación
 
@@ -167,7 +167,7 @@ datos <- datos_raw %>%
 cat("Registros después de limpieza:", format(nrow(datos), big.mark = ","), "\n")
 ```
 
----
+------------------------------------------------------------------------
 
 # Exploración de Variables Numéricas
 
@@ -229,6 +229,7 @@ datos %>%
   theme_minimal() +
   theme(legend.position = "top")
 ```
+
 ## Normalidad (Edad)
 
 ```{r normalidad_edad}
@@ -243,7 +244,6 @@ set.seed(123)
 xm <- sample(x, size = min(length(x), 5000))
 shapiro.test(xm)
 
-```{r boxplot_edad, fig.width=10}
 datos %>%
   filter(!is.na(edad_anios), !is.na(sexo)) %>%
   ggplot(aes(x = sexo, y = edad_anios, fill = sexo)) +
@@ -301,7 +301,7 @@ datos %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
----
+------------------------------------------------------------------------
 
 # Exploración de Variables Categóricas
 
@@ -428,7 +428,7 @@ datos %>%
   theme_minimal()
 ```
 
----
+------------------------------------------------------------------------
 
 # Relaciones entre Variables
 
@@ -532,7 +532,7 @@ datos %>%
   theme(legend.position = "top")
 ```
 
----
+------------------------------------------------------------------------
 
 # Conclusiones
 
@@ -540,23 +540,23 @@ datos %>%
 
 **Variables Numéricas:**
 
-- Edad promedio: ~`r round(mean(datos$edad_anios, na.rm = TRUE), 1)` años
-- Distribución bimodal (infantil y adulto mayor)
-- Incremento notable 2020-2021
+-   Edad promedio: \~`r round(mean(datos$edad_anios, na.rm = TRUE), 1)` años
+-   Distribución bimodal (infantil y adulto mayor)
+-   Incremento notable 2020-2021
 
 **Variables Categóricas:**
 
-- Mayor mortalidad masculina (~59%)
-- Concentración urbana
-- Causas mal definidas predominantes
+-   Mayor mortalidad masculina (\~59%)
+-   Concentración urbana
+-   Causas mal definidas predominantes
 
 **Relaciones:**
 
-- Área geográfica asociada con asistencia médica
-- Departamentos poblados concentran más casos absolutos
-- Patrón consistente de mayor mortalidad masculina
+-   Área geográfica asociada con asistencia médica
+-   Departamentos poblados concentran más casos absolutos
+-   Patrón consistente de mayor mortalidad masculina
 
----
+------------------------------------------------------------------------
 
 ```{r session_info}
 sessionInfo()
