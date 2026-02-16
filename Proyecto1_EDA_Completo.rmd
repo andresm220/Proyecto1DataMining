@@ -800,11 +800,3 @@ top_cat("ocur")
 ```{r session_info}
 sessionInfo()
 ```
-
-
-## Siguientes pasos
-
-- Refinar limpieza (valores faltantes y categorías poco informativas).
-- Validar preguntas adicionales (por ejemplo, causas CIE-10 por grupo etario/departamento).
-- Profundizar en los clusters: nombrar grupos, comparar distribuciones y generar hipótesis nuevas.
-- Preparar el informe final en PDF **sin código**, resumiendo hallazgos con tablas y gráficos clave.
